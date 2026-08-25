@@ -183,9 +183,13 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         params = {"symbol": order.symbol, "side": order.side, "type": order.order_type, "quantity": order.quantity, "newClientOrderId": order.client_order_id, "reduceOnly": str(order.reduce_only).lower()}
         if order.price is not None and order.order_type != "MARKET":
             params["price"] = order.price
+            params["timeInForce"] = "GTC"
         if order.stop_price is not None:
             params["stopPrice"] = order.stop_price
         return params
+
+    def order_query_params(self, client_order_id):
+        return {"symbol": self.config.symbol or "BTCUSDT", "origClientOrderId": client_order_id}
 
 
 class BybitExecutionAdapter(NormalizingExecutionAdapter):
