@@ -63,6 +63,46 @@ def test_exchange_specific_order_schemas_and_bybit_response_normalization():
     assert BinanceExecutionAdapter(config).normalize_orders({"symbol": "BTCUSDT", "orderId": "1", "clientOrderId": "x", "side": "BUY", "origQty": "1", "status": "NEW"})[0].client_order_id == "x"
 
 
+def test_binance_protection_translation_preserves_trigger_and_quantity_semantics():
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config)
+    stop = OrderRequest("stop", None, "BTCUSDT", "SELL", "STOP_MARKET", 0.1, stop_price=98, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    take_profit = OrderRequest("tp", None, "BTCUSDT", "SELL", "TAKE_PROFIT", 0.1, price=104, stop_price=104, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    assert adapter.order_params(stop) == {"symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "newClientOrderId": "stop", "quantity": 0.1, "reduceOnly": "true", "stopPrice": 98}
+    assert adapter.order_params(take_profit)["type"] == "TAKE_PROFIT"
+    assert adapter.order_params(take_profit)["stopPrice"] == 104
+    assert adapter.order_params(take_profit)["side"] == "SELL"
+    assert adapter.order_params(take_profit)["quantity"] == 0.1
+
+
+def test_binance_close_position_translation_omits_incompatible_fields():
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config)
+    close_stop = OrderRequest("close-stop", None, "BTCUSDT", "SELL", "STOP_MARKET", 0, stop_price=98, close_position=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    close_tp = OrderRequest("close-tp", None, "BTCUSDT", "SELL", "TAKE_PROFIT", 0, stop_price=104, close_position=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    stop_params = adapter.order_params(close_stop)
+    tp_params = adapter.order_params(close_tp)
+    assert stop_params["closePosition"] == "true"
+    assert "quantity" not in stop_params and "reduceOnly" not in stop_params
+    assert stop_params["stopPrice"] == 98
+    assert tp_params["type"] == "TAKE_PROFIT_MARKET"
+    assert tp_params["closePosition"] == "true"
+    assert "quantity" not in tp_params and "reduceOnly" not in tp_params
+
+
+def test_invalid_protection_contracts_are_rejected():
+    with pytest.raises(ValueError):
+        OrderRequest("bad-trigger", None, "BTCUSDT", "SELL", "STOP_MARKET", 1)
+    with pytest.raises(ValueError):
+        OrderRequest("bad-side", None, "BTCUSDT", "HOLD", "STOP_MARKET", 1, stop_price=98)
+    with pytest.raises(ValueError):
+        OrderRequest("bad-quantity", None, "BTCUSDT", "SELL", "STOP_MARKET", 0, stop_price=98)
+    with pytest.raises(ValueError):
+        OrderRequest("bad-close-quantity", None, "BTCUSDT", "SELL", "STOP_MARKET", 1, stop_price=98, close_position=True)
+    with pytest.raises(ValueError):
+        OrderRequest("bad-close-reduce", None, "BTCUSDT", "SELL", "STOP_MARKET", 0, stop_price=98, close_position=True, reduce_only=True)
+
+
 def test_transport_normalizes_failures_without_secrets():
     def opener(*_args, **_kwargs):
         raise TimeoutError("secret should not appear")

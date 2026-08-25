@@ -180,12 +180,18 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         super().__init__("BINANCE", config, transport)
 
     def order_params(self, order):
-        params = {"symbol": order.symbol, "side": order.side, "type": order.order_type, "quantity": order.quantity, "newClientOrderId": order.client_order_id, "reduceOnly": str(order.reduce_only).lower()}
+        order_type = "TAKE_PROFIT_MARKET" if order.order_type == "TAKE_PROFIT" and order.close_position else order.order_type
+        params = {"symbol": order.symbol, "side": order.side, "type": order_type, "newClientOrderId": order.client_order_id}
+        if not order.close_position:
+            params["quantity"] = order.quantity
+            params["reduceOnly"] = str(order.reduce_only).lower()
         if order.price is not None and order.order_type != "MARKET":
             params["price"] = order.price
             params["timeInForce"] = "GTC"
         if order.stop_price is not None:
             params["stopPrice"] = order.stop_price
+        if order.close_position:
+            params["closePosition"] = "true"
         return params
 
     def order_query_params(self, client_order_id):

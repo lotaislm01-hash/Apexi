@@ -76,6 +76,18 @@ class OrderRequest:
     parent_client_order_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if self.side.upper() not in {"BUY", "SELL"}:
+            raise ValueError("Order side must be BUY or SELL")
+        if self.quantity < 0 or (self.quantity == 0 and not self.close_position):
+            raise ValueError("Order quantity must be positive unless close_position is set")
+        if self.close_position and self.quantity != 0:
+            raise ValueError("close_position cannot include quantity")
+        if self.close_position and self.reduce_only:
+            raise ValueError("close_position cannot be combined with reduce_only")
+        if self.order_type in {"STOP_MARKET", "TAKE_PROFIT"} and (self.stop_price is None or self.stop_price <= 0):
+            raise ValueError(f"{self.order_type} requires a positive trigger price")
+
     def to_dict(self) -> dict[str, Any]:
         result = dict(vars(self))
         result["status"] = self.status.value

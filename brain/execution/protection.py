@@ -32,7 +32,7 @@ class ProtectionManager:
             client_order_id=f"{entry.client_order_id}-sl", exchange_order_id=None,
             symbol=intent.symbol, side="SELL" if intent.action == "LONG" else "BUY",
             order_type="STOP_MARKET", quantity=float(intent.quantity), stop_price=float(intent.stop_loss),
-            reduce_only=True, close_position=True, leverage=float(intent.leverage),
+            reduce_only=True, close_position=False, leverage=float(intent.leverage),
             exchange=exchange, execution_mode=mode, parent_client_order_id=entry.client_order_id,
         ))
         for index, target in enumerate((intent.tp1, intent.tp2, intent.tp3), start=1):
@@ -41,8 +41,8 @@ class ProtectionManager:
             orders.append(OrderRequest(
                 client_order_id=f"{entry.client_order_id}-tp{index}", exchange_order_id=None,
                 symbol=intent.symbol, side="SELL" if intent.action == "LONG" else "BUY",
-                order_type="TAKE_PROFIT", quantity=float(intent.quantity), price=float(target),
-                reduce_only=True, close_position=True, leverage=float(intent.leverage),
+                order_type="TAKE_PROFIT", quantity=float(intent.quantity), price=float(target), stop_price=float(target),
+                reduce_only=True, close_position=False, leverage=float(intent.leverage),
                 exchange=exchange, execution_mode=mode,
                 parent_client_order_id=entry.client_order_id,
             ))
