@@ -103,6 +103,9 @@ class DashboardHTTPServer(ThreadingHTTPServer):
                     payload = service.get(handler.path)
                     body = json.dumps(payload, sort_keys=True, default=str).encode()
                     handler.send_response(200)
+                except PermissionError as error:
+                    body = json.dumps({"error": "forbidden", "message": str(error)}, sort_keys=True).encode()
+                    handler.send_response(403)
                 except KeyError:
                     body = b'{"error":"not found"}'
                     handler.send_response(404)

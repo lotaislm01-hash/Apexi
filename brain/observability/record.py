@@ -65,5 +65,5 @@ class ObservabilityRecorder:
             decision.levels.tp1,
             decision.levels.tp2,
             result.risk.to_dict() if hasattr(result.risk, "to_dict") else vars(result.risk),
-            getattr(result, "paper_execution", None),
+            result.intent.to_dict() if getattr(result, "intent", None) is not None else None,
         )

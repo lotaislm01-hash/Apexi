@@ -52,8 +52,9 @@ def test_http_server_serves_canonical_snapshot_and_forbids_mutation():
     try:
         with urlopen(f"http://127.0.0.1:{server.server_port}/health") as response:
             assert response.status == 200
-        with __import__("pytest").raises(Exception):
-            urlopen(f"http://127.0.0.1:{server.server_port}/order", data=b"{}")
+        with pytest.raises(Exception) as error:
+            urlopen(f"http://127.0.0.1:{server.server_port}/order")
+        assert getattr(error.value, "code", None) == 403
     finally:
         server.shutdown()
         server.server_close()
