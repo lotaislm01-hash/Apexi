@@ -79,3 +79,24 @@ class ExecutionCoordinator:
 
     def reconcile(self, expected: PositionSnapshot | None = None) -> ReconciliationResult:
         return self.adapter.reconcile(expected)
+
+    def submit_order_request(self, order: OrderRequest, *, now: float = 0.0) -> ExecutionOutcome:
+        """Submit a derived protection/order request through the same safety gate."""
+        if not self.config.allows_submission(self.adapter.exchange, order.symbol):
+            return ExecutionOutcome("REJECTED", reason="EXECUTION_MODE_DISABLED")
+        if self.config.global_kill_switch or self.config.exchange_kill_switch:
+            return ExecutionOutcome("REJECTED", reason="KILL_SWITCH")
+        if order.leverage > self.config.max_leverage or order.quantity <= 0:
+            return ExecutionOutcome("REJECTED", reason="INVALID_ORDER")
+        if order.client_order_id in self._requests:
+            existing = self.adapter.get_order(order.client_order_id)
+            return ExecutionOutcome("DUPLICATE", existing, "DUPLICATE_ORDER")
+        if not self.adapter.health_check():
+            return ExecutionOutcome("REJECTED", reason="EXCHANGE_UNAVAILABLE")
+        self._requests[order.client_order_id] = str(order.to_dict())
+        try:
+            submitted = self.adapter.submit_order(order)
+        except (TimeoutError, ConnectionError):
+            existing = self.adapter.get_order(order.client_order_id)
+            return ExecutionOutcome("RECONCILED", existing, "TIMEOUT_RECONCILED") if existing else ExecutionOutcome("UNKNOWN", reason="SUBMISSION_STATUS_UNKNOWN")
+        return ExecutionOutcome("SUBMITTED", submitted)

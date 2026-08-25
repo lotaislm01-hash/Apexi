@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .model import OrderRequest
+from .model import ExecutionMode, OrderRequest
 
 
 @dataclass(frozen=True)
@@ -19,21 +19,21 @@ class ProtectionResult:
 class ProtectionManager:
     """Validate and verify protective orders without assuming exchange success."""
 
-    def create_plan(self, intent) -> tuple[OrderRequest, ...]:
+    def create_plan(self, intent, *, exchange: str = "PAPER", mode: ExecutionMode = ExecutionMode.PAPER) -> tuple[OrderRequest, ...]:
         if not intent.approved:
             raise ValueError("Protection requires an approved intent")
         if intent.action == "LONG" and not intent.stop_loss < intent.entry:
             raise ValueError("Long stop-loss must be below entry")
         if intent.action == "SHORT" and not intent.stop_loss > intent.entry:
             raise ValueError("Short stop-loss must be above entry")
-        orders = [OrderRequest.from_intent(intent)]
+        orders = [OrderRequest.from_intent(intent, exchange=exchange, mode=mode)]
         if intent.tp1 is not None:
             orders.append(OrderRequest(
                 client_order_id=f"{orders[0].client_order_id}-tp1", exchange_order_id=None,
                 symbol=intent.symbol, side="SELL" if intent.action == "LONG" else "BUY",
                 order_type="TAKE_PROFIT", quantity=float(intent.quantity), price=float(intent.tp1),
                 reduce_only=True, close_position=False, leverage=float(intent.leverage),
-                exchange="PAPER", execution_mode=orders[0].execution_mode,
+                exchange=exchange, execution_mode=mode,
                 parent_client_order_id=orders[0].client_order_id,
             ))
         return tuple(orders)

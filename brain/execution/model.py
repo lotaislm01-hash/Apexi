@@ -16,10 +16,15 @@ class ExecutionMode(str, Enum):
 
 class OrderStatus(str, Enum):
     NEW = "NEW"
+    SUBMITTING = "SUBMITTING"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
+    CANCEL_PENDING = "CANCEL_PENDING"
     CANCELED = "CANCELED"
+    CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -35,6 +40,10 @@ class ExecutionConfig:
     max_leverage: float = 5.0
     stale_intent_after: float = 30.0
     credentials: dict[str, str] = field(default_factory=dict)
+    exchange: str = "PAPER"
+    base_url: str | None = None
+    recv_window: int = 5000
+    timeout: float = 10.0
 
     def allows_submission(self, exchange: str, symbol: str) -> bool:
         if self.mode is ExecutionMode.LIVE:

@@ -10,6 +10,8 @@ from .model import ExecutionConfig, ExecutionMode, OrderRequest, OrderStatus, Po
 from .protection import ProtectionManager, ProtectionResult
 from .lifecycle import ExecutionEvent, ExecutionLedger
 from .paper_adapter import PaperExecutionAdapter
+from .state import OrderStateMachine
+from .transport import AuthenticatedRESTTransport, ExecutionTransportError, TestnetEndpoint
 
 
 class LiveExecutionDisabled(RuntimeError):
@@ -63,4 +65,8 @@ __all__ = [
     "ExecutionEvent",
     "ExecutionLedger",
     "PaperExecutionAdapter",
+    "OrderStateMachine",
+    "AuthenticatedRESTTransport",
+    "ExecutionTransportError",
+    "TestnetEndpoint",
 ]
