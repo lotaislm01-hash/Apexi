@@ -99,3 +99,11 @@ def test_invalid_health_and_unapproved_orders_never_submit():
     adapter.healthy = False
     assert ExecutionCoordinator(adapter).submit_intent(intent()).reason == "EXCHANGE_UNAVAILABLE"
     assert ExecutionCoordinator(InMemoryExecutionAdapter()).submit_intent(replace(intent(), approved=False)).reason == "RISK_NOT_APPROVED"
+
+
+def test_paper_mode_cannot_reach_a_network_transport():
+    calls = []
+    adapter = BinanceExecutionAdapter(ExecutionConfig(mode=ExecutionMode.PAPER), transport=lambda *args: calls.append(args))
+    outcome = ExecutionCoordinator(adapter).submit_intent(intent())
+    assert outcome.status == "SUBMITTED"
+    assert calls == []
