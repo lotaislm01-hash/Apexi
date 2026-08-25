@@ -20,3 +20,23 @@ def test_ledger_is_deterministically_serializable():
         "event_type": "INTENT_CREATED", "client_order_id": None, "event_time": 1,
         "details": {"reason": "signal", "symbol": "BTCUSDT"},
     }]
+
+
+def test_sqlite_ledger_recovers_events_after_restart(tmp_path):
+    path = str(tmp_path / "execution.sqlite3")
+    first = ExecutionLedger(path)
+    first.record("ORDER_SUBMITTED", client_order_id="apex-1", event_time=2, symbol="BTCUSDT")
+    second = ExecutionLedger(path)
+    assert second.snapshot() == [{
+        "event_type": "ORDER_SUBMITTED", "client_order_id": "apex-1", "event_time": 2,
+        "details": {"symbol": "BTCUSDT"},
+    }]
+
+
+def test_coordinator_can_use_configured_durable_ledger(tmp_path):
+    path = str(tmp_path / "coordinator.sqlite3")
+    config = ExecutionConfig(state_db_path=path)
+    coordinator = ExecutionCoordinator(PaperExecutionAdapter(), config)
+    coordinator.submit_intent(intent(), now=3)
+    recovered = ExecutionLedger(path)
+    assert recovered.snapshot()[-1]["event_type"] == "FILLED"

@@ -26,7 +26,7 @@ class ExecutionCoordinator:
         self.adapter = adapter
         self.config = config or ExecutionConfig()
         self._requests: dict[str, str] = {}
-        self.ledger = ledger or ExecutionLedger()
+        self.ledger = ledger or ExecutionLedger(self.config.state_db_path)
         self.last_transport_error: ExecutionTransportError | None = None
 
     def submit_intent(self, intent, *, as_of: float | None = None, now: float = 0.0) -> ExecutionOutcome:

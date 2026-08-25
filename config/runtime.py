@@ -30,6 +30,7 @@ class RuntimeConfig:
     risk_profile: RiskProfile = RiskProfile.CONSERVATIVE
     account_size_usd: float = 500.0
     scanner_interval_seconds: int = 15
+    state_db_path: str | None = None
     live_enabled: bool = False
     live_confirmation: str | None = None
     api_key: str | None = None
@@ -43,6 +44,7 @@ class RuntimeConfig:
         profile = RiskProfile(values.get("APEX_RISK_PROFILE", "conservative").strip().lower())
         account_size = float(values.get("APEX_ACCOUNT_SIZE_USD", "500"))
         interval = int(values.get("APEX_SCANNER_INTERVAL_SECONDS", "15"))
+        state_db_path = values.get("APEX_STATE_DB_PATH")
         live_enabled = _parse_bool(values.get("APEX_LIVE_ENABLED", "false"))
         live_confirmation = values.get("APEX_LIVE_CONFIRMATION")
         base_url = values.get("APEX_BASE_URL")
@@ -54,7 +56,7 @@ class RuntimeConfig:
                 raise ValueError("PAPER mode requires exchange=PAPER")
             if base_url:
                 raise ValueError("PAPER mode cannot configure an exchange endpoint")
-            return cls(mode, exchange, None, profile, account_size, interval, False, None, None, None)
+            return cls(mode, exchange, None, profile, account_size, interval, state_db_path, False, None, None, None)
 
         if exchange != "BINANCE":
             raise ValueError("Only Binance is enabled by this runtime configuration")
@@ -63,14 +65,14 @@ class RuntimeConfig:
                 raise ValueError("TESTNET requires the official Binance TESTNET endpoint")
             if live_enabled:
                 raise ValueError("TESTNET cannot enable LIVE execution")
-            return cls(mode, exchange, base_url, profile, account_size, interval, False,
+            return cls(mode, exchange, base_url, profile, account_size, interval, state_db_path, False,
                        None, values.get(BINANCE_TESTNET_API_KEY), values.get(BINANCE_TESTNET_API_SECRET))
 
         if not live_enabled or live_confirmation != "ENABLE_LIVE_TRADING":
             raise ValueError("LIVE requires explicit enablement and confirmation")
         if base_url != BINANCE_PRODUCTION_ENDPOINT:
             raise ValueError("LIVE requires the explicitly whitelisted Binance production endpoint")
-        return cls(mode, exchange, base_url, profile, account_size, interval, True,
+        return cls(mode, exchange, base_url, profile, account_size, interval, state_db_path, True,
                    live_confirmation, values.get("BINANCE_API_KEY"), values.get("BINANCE_API_SECRET"))
 
     def require_credentials(self) -> None:
@@ -87,6 +89,7 @@ class RuntimeConfig:
             "risk_profile": self.risk_profile.value,
             "account_size_usd": self.account_size_usd,
             "scanner_interval_seconds": self.scanner_interval_seconds,
+            "state_db_path": self.state_db_path,
             "live_enabled": self.live_enabled,
             "has_api_key": bool(self.api_key),
             "has_api_secret": bool(self.api_secret),

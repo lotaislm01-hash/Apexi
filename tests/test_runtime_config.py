@@ -8,6 +8,7 @@ def test_runtime_defaults_fail_closed_to_paper():
     assert config.mode is RuntimeMode.PAPER
     assert config.exchange == "PAPER"
     assert config.live_enabled is False
+    assert config.state_db_path is None
     config.require_credentials()
     assert config.redacted()["has_api_secret"] is False
 
