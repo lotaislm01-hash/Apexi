@@ -21,3 +21,18 @@ def test_backtest_excludes_invalid_missing_and_risk_rejected_records():
         {"decision": decision(), "final_price": 104},
     ]
     assert BacktestEngine().run(records).total_trades == 1
+
+
+def test_backtest_can_consume_canonical_replay_results_deterministically():
+    from brain.pipeline import ApexBrainPipeline
+    from market.replay import RawBybitEvent, RawBybitReplayHarness
+
+    events = [RawBybitEvent(1, 1, {
+        "topic": "tickers.BTCUSDT", "ts": 1000,
+        "data": {"lastPrice": "100"},
+    })]
+    harness = RawBybitReplayHarness(events)
+    first = BacktestEngine().run_replay(harness, ApexBrainPipeline()).to_dict()
+    second = BacktestEngine().run_replay(harness, ApexBrainPipeline()).to_dict()
+    assert first == second
+    assert first["total_trades"] == 0

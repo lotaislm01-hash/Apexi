@@ -27,6 +27,22 @@ class BacktestResult:
 class BacktestEngine:
     """Calculate paper outcomes from canonical, already replayed trade records."""
 
+    def run_replay(self, replay, pipeline) -> BacktestResult:
+        """Backtest decisions produced by the canonical replay/pipeline path."""
+        records = []
+        for step in replay.run_steps(pipeline):
+            result = getattr(step, "pipeline_result", step)
+            intent = getattr(result, "intent", None)
+            records.append({
+                "decision": result.decision,
+                "risk_approved": result.risk.approved,
+                "quantity": intent.quantity if intent is not None else 0,
+                "final_price": result.context.current_price,
+                "event_time": result.context.event_time,
+                "regime": result.context.market_regime,
+            })
+        return self.run(records)
+
     def run(self, records) -> BacktestResult:
         returns = []
         holds = []
