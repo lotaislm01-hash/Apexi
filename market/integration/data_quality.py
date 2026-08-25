@@ -77,10 +77,35 @@ class DataQualityEngine:
                     reasons.append("CROSSED_ORDER_BOOK")
             except (TypeError, ValueError):
                 reasons.append("INVALID_PRICE")
-        if event.get("sequence_gap") or event.get("out_of_order"):
+        if event.get("sequence_gap"):
             reasons.append("INVALID_SEQUENCE")
+        if event.get("sequence_regression") or event.get("out_of_order"):
+            reasons.append("SEQUENCE_REGRESSION")
         if event.get("conflicting_snapshot"):
             reasons.append("CONFLICTING_SNAPSHOT")
+        if event.get("reconnect"):
+            reasons.append("RECONNECT")
+        if event.get("missing_snapshot"):
+            reasons.append("MISSING_SNAPSHOT")
+        if kind in {"orderbook", "book", "order_book"}:
+            bids = event.get("bids", ())
+            asks = event.get("asks", ())
+            if not bids or not asks:
+                reasons.append("INVALID_ORDER_BOOK")
+            try:
+                bid_prices = [float(level[0]) for level in bids]
+                ask_prices = [float(level[0]) for level in asks]
+                if max(bid_prices) >= min(ask_prices):
+                    reasons.append("CROSSED_BOOK")
+            except (TypeError, ValueError, IndexError):
+                reasons.append("INVALID_ORDER_BOOK")
+        if kind in {"oi", "openinterest", "open_interest", "funding"}:
+            value = event.get("value", event.get("open_interest", event.get("funding_rate")))
+            try:
+                if value is None or not isfinite(float(value)) or (kind != "funding" and float(value) < 0):
+                    reasons.append("INVALID_VALUE")
+            except (TypeError, ValueError):
+                reasons.append("INVALID_VALUE")
         if event.get("missing"):
             return QualityResult("INCOMPLETE", ("MISSING_DATA",))
         if event.get("stale"):
@@ -89,13 +114,13 @@ class DataQualityEngine:
             return QualityResult("INVALID", tuple(dict.fromkeys(reasons)))
         return QualityResult("VALID")
 
-    def validate(self, events: Iterable[dict[str, Any]], *, as_of: float | None = None, symbol: str | None = None) -> list[QualityResult]:
+    def validate(self, events: Iterable[dict[str, Any]], *, as_of: float | None = None, symbol: str | None = None, timeframe: str | None = None) -> list[QualityResult]:
         results: list[QualityResult] = []
         seen: set[Any] = set()
         previous_time: float | None = None
         for event in events:
             key = event.get("id", event.get("trade_id", event.get("sequence")))
-            result = self.validate_event(event, as_of=as_of, symbol=symbol)
+            result = self.validate_event(event, as_of=as_of, symbol=symbol, timeframe=timeframe)
             if key is not None and key in seen:
                 result = QualityResult("DUPLICATE", ("DUPLICATE_EVENT",))
             elif key is not None:

@@ -19,3 +19,25 @@ def test_data_quality_covers_trade_ohlc_book_interval_missing_and_stale():
     assert "INVALID_CANDLE_INTERVAL" in engine.validate_event({"event_time": 1, "interval": 0}).reason_codes
     assert engine.validate_event({"missing": True}).status == "INCOMPLETE"
     assert engine.validate_event({"stale": True}).status == "STALE"
+
+
+def test_data_quality_covers_feed_wide_market_components():
+    engine = DataQualityEngine()
+    crossed = engine.validate_event({
+        "kind": "orderbook", "event_time": 1,
+        "bids": [[101, 1]], "asks": [[100, 1]],
+    })
+    assert "CROSSED_BOOK" in crossed.reason_codes
+    assert "INVALID_ORDER_BOOK" not in crossed.reason_codes
+    assert "INVALID_VALUE" in engine.validate_event({
+        "kind": "oi", "event_time": 1, "value": -1,
+    }).reason_codes
+    assert "INVALID_VALUE" in engine.validate_event({
+        "kind": "funding", "event_time": 1, "value": "bad",
+    }).reason_codes
+    assert "RECONNECT" in engine.validate_event({
+        "kind": "feed", "event_time": 1, "reconnect": True,
+    }).reason_codes
+    assert "TIMEFRAME_MISMATCH" in engine.validate_event(
+        {"event_time": 1, "timeframe": "5m"}, timeframe="1m"
+    ).reason_codes

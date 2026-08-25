@@ -28,9 +28,45 @@ class LiveSnapshotContextAdapter:
             {**item, "event_time": float(item["timestamp"]) / 1000}
             for item in data.trades
         ] + list(data.candles)
+        if data.orderbook_event_time is not None:
+            quality_events.append({
+                "kind": "orderbook",
+                "event_time": data.orderbook_event_time,
+                "symbol": state.symbol,
+                "bids": data.snapshot_bids(50),
+                "asks": data.snapshot_asks(50),
+                "missing_snapshot": not data.book_ready,
+            })
+        if data.oi_event_time is not None:
+            quality_events.append({
+                "kind": "oi",
+                "event_time": data.oi_event_time,
+                "symbol": state.symbol,
+                "value": data.open_interest,
+            })
+        if data.funding_event_time is not None:
+            quality_events.append({
+                "kind": "funding",
+                "event_time": data.funding_event_time,
+                "symbol": state.symbol,
+                "value": data.funding_rate,
+            })
+        if data.continuity_status in {"RECONNECTING", "DISCONNECTED", "SEQUENCE_GAP", "OUT_OF_ORDER"}:
+            quality_events.append({
+                "kind": "feed",
+                "event_time": data.last_event_time,
+                "symbol": state.symbol,
+                "reconnect": data.continuity_status in {"RECONNECTING", "DISCONNECTED"},
+                "sequence_gap": data.continuity_status == "SEQUENCE_GAP",
+                "out_of_order": data.continuity_status == "OUT_OF_ORDER",
+            })
+        quality_events = [
+            item for item in quality_events
+            if item.get("event_time") is None or float(item["event_time"]) <= cutoff
+        ]
         quality_events.sort(key=lambda item: float(item.get("event_time", 0)))
         quality_results = quality_engine.validate(quality_events, as_of=cutoff, symbol=state.symbol)
-        if any(result.status == "INVALID" for result in quality_results):
+        if any(result.status not in {"VALID"} for result in quality_results):
             quality = "DATA_INVALID"
             quality_reason = "Invalid market event in canonical input"
         price_state = self.snapshot.feed.price_history.state(as_of=cutoff)
