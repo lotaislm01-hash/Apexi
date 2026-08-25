@@ -85,15 +85,18 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
         return super().submit_order(order)
 
     def get_order(self, client_order_id):
-        payload = self._testnet_request("GET", self.order_path, {"clientOrderId": client_order_id})
+        payload = self._testnet_request("GET", self.order_query_path, self.order_query_params(client_order_id))
         orders = self.normalize_orders(payload)
         return orders[0] if orders else None
 
     def cancel_order(self, client_order_id):
-        return self.normalize_order(self._testnet_request("DELETE", self.order_path, {"clientOrderId": client_order_id}))
+        return self.normalize_order(self._testnet_request("DELETE", self.cancel_path, self.order_query_params(client_order_id)))
 
     def amend_order(self, order):
-        return self.normalize_order(self._testnet_request("PUT", self.order_path, self.order_params(order)))
+        return self.normalize_order(self._testnet_request("PUT", self.amend_path, self.order_params(order)))
+
+    def order_query_params(self, client_order_id):
+        return {"origClientOrderId": client_order_id}
 
     def normalize_account(self, payload):
         if not isinstance(payload, dict):
@@ -120,6 +123,8 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
         return [PositionSnapshot(str(item.get("symbol", "")).upper(), "LONG" if float(item.get("positionAmt", item.get("size", 0))) > 0 else "SHORT", abs(float(item.get("positionAmt", item.get("size", 0)))), float(item.get("entryPrice", item.get("avgPrice", 0))) or None, self.exchange) for item in values if float(item.get("positionAmt", item.get("size", 0))) != 0]
 
     def normalize_orders(self, payload):
+        if isinstance(payload, dict) and payload.get("symbol"):
+            return [self.normalize_order(payload)]
         values = payload if isinstance(payload, list) else payload.get("orders", payload.get("result", [])) if isinstance(payload, dict) else []
         if isinstance(values, dict):
             values = values.get("list", [])
@@ -168,6 +173,9 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
     position_path = "/fapi/v2/positionRisk"
     open_orders_path = "/fapi/v1/openOrders"
     order_path = "/fapi/v1/order"
+    order_query_path = "/fapi/v1/order"
+    cancel_path = "/fapi/v1/order"
+    amend_path = "/fapi/v1/order"
     def __init__(self, config=None, transport=None):
         super().__init__("BINANCE", config, transport)
 
@@ -185,6 +193,9 @@ class BybitExecutionAdapter(NormalizingExecutionAdapter):
     position_path = "/v5/position/list"
     open_orders_path = "/v5/order/realtime"
     order_path = "/v5/order/create"
+    order_query_path = "/v5/order/realtime"
+    cancel_path = "/v5/order/cancel"
+    amend_path = "/v5/order/amend"
     def __init__(self, config=None, transport=None):
         super().__init__("BYBIT", config, transport)
 
@@ -195,6 +206,9 @@ class BybitExecutionAdapter(NormalizingExecutionAdapter):
         if order.stop_price is not None:
             params["triggerPrice"] = str(order.stop_price)
         return params
+
+    def order_query_params(self, client_order_id):
+        return {"category": "linear", "symbol": self.config.symbol or "BTCUSDT", "orderLinkId": client_order_id}
 
     def normalize_order(self, response: dict[str, Any]) -> OrderRequest:
         if isinstance(response.get("result"), dict):

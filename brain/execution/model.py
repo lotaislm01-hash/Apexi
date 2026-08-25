@@ -44,6 +44,7 @@ class ExecutionConfig:
     base_url: str | None = None
     recv_window: int = 5000
     timeout: float = 10.0
+    symbol: str | None = None
 
     def allows_submission(self, exchange: str, symbol: str) -> bool:
         if self.mode is ExecutionMode.LIVE:

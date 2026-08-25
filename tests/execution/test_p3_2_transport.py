@@ -60,6 +60,7 @@ def test_exchange_specific_order_schemas_and_bybit_response_normalization():
     assert normalized.client_order_id == "apex-b1"
     assert normalized.status is OrderStatus.PARTIALLY_FILLED
     assert normalized.filled_quantity == 30
+    assert BinanceExecutionAdapter(config).normalize_orders({"symbol": "BTCUSDT", "orderId": "1", "clientOrderId": "x", "side": "BUY", "origQty": "1", "status": "NEW"})[0].client_order_id == "x"
 
 
 def test_transport_normalizes_failures_without_secrets():
@@ -71,6 +72,23 @@ def test_transport_normalizes_failures_without_secrets():
         transport.request("GET", "/fapi/v2/account")
     assert error.value.category == "TIMEOUT"
     assert "secret" not in str(error.value)
+
+
+def test_transport_timeout_enters_unknown_without_blind_resubmission():
+    calls = []
+
+    def request(method, path, params):
+        calls.append((method, path))
+        if path == "/fapi/v2/account":
+            return {}
+        raise ExecutionTransportError("TIMEOUT", "request timed out")
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, credentials={"api_key": "key", "api_secret": "secret"}, symbol="BTCUSDT")
+    adapter = BinanceExecutionAdapter(config, transport=request)
+    from brain.execution import ExecutionCoordinator
+    outcome = ExecutionCoordinator(adapter, config).submit_intent(intent(), now=1)
+    assert outcome.status == "UNKNOWN"
+    assert calls == [("GET", "/fapi/v2/account"), ("POST", "/fapi/v1/order"), ("GET", "/fapi/v1/order")]
 
 
 def test_binance_and_bybit_testnet_methods_use_injected_transport():

@@ -6,6 +6,7 @@ from typing import Any
 from .adapter import ExchangeExecutionAdapter
 from .model import ExecutionConfig, ExecutionMode, OrderRequest, OrderStatus, PositionSnapshot, ReconciliationResult
 from .lifecycle import ExecutionLedger
+from .transport import ExecutionTransportError
 
 
 @dataclass(frozen=True)
@@ -58,15 +59,22 @@ class ExecutionCoordinator:
             return ExecutionOutcome("REJECTED", reason="AMBIGUOUS_RETRY_REQUIRES_RECONCILIATION")
         if not self.adapter.health_check():
             return ExecutionOutcome("REJECTED", reason="EXCHANGE_UNAVAILABLE")
-        account = self.adapter.get_account_state()
+        try:
+            account = self.adapter.get_account_state()
+        except (TimeoutError, ConnectionError, ExecutionTransportError):
+            self.ledger.record("EXECUTION_FAILURE", event_time=now, reason="EXCHANGE_UNAVAILABLE")
+            return ExecutionOutcome("REJECTED", reason="EXCHANGE_UNAVAILABLE")
         if float(account.get("available_balance", float("inf"))) < notional / max(float(intent.leverage), 1.0):
             return ExecutionOutcome("REJECTED", reason="INSUFFICIENT_BALANCE")
         self._requests[order.client_order_id] = fingerprint
         self.ledger.record("EXECUTION_APPROVED", client_order_id=order.client_order_id, event_time=now, exchange=self.adapter.exchange)
         try:
             submitted = self.adapter.submit_order(order)
-        except (TimeoutError, ConnectionError):
-            existing = self.adapter.get_order(order.client_order_id)
+        except (TimeoutError, ConnectionError, ExecutionTransportError):
+            try:
+                existing = self.adapter.get_order(order.client_order_id)
+            except (TimeoutError, ConnectionError, ExecutionTransportError):
+                existing = None
             if existing is not None:
                 self.ledger.record("RECONCILIATION", client_order_id=order.client_order_id, event_time=now, status="RECONCILED")
                 return ExecutionOutcome("RECONCILED", existing, "TIMEOUT_RECONCILED")
@@ -96,7 +104,10 @@ class ExecutionCoordinator:
         self._requests[order.client_order_id] = str(order.to_dict())
         try:
             submitted = self.adapter.submit_order(order)
-        except (TimeoutError, ConnectionError):
-            existing = self.adapter.get_order(order.client_order_id)
+        except (TimeoutError, ConnectionError, ExecutionTransportError):
+            try:
+                existing = self.adapter.get_order(order.client_order_id)
+            except (TimeoutError, ConnectionError, ExecutionTransportError):
+                existing = None
             return ExecutionOutcome("RECONCILED", existing, "TIMEOUT_RECONCILED") if existing else ExecutionOutcome("UNKNOWN", reason="SUBMISSION_STATUS_UNKNOWN")
         return ExecutionOutcome("SUBMITTED", submitted)
