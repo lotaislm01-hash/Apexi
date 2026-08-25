@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 from typing import Any
 
 from .adapter import InMemoryExecutionAdapter
@@ -229,17 +230,23 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         return regular + self.normalize_orders(payload)
 
     def order_params(self, order):
+        def decimal_param(value, field, places):
+            decimal = Decimal(str(value))
+            if -decimal.as_tuple().exponent > places:
+                raise ValueError(f"Binance {field} exceeds {places} decimal places")
+            return format(decimal, "f")
+
         if order.order_type in {"STOP_MARKET", "TAKE_PROFIT"}:
             order_type = "TAKE_PROFIT_MARKET" if order.order_type == "TAKE_PROFIT" and order.close_position else order.order_type
             params = {"algoType": "CONDITIONAL", "symbol": order.symbol, "side": order.side, "type": order_type, "clientAlgoId": order.client_order_id}
             if not order.close_position:
-                params["quantity"] = order.quantity
+                params["quantity"] = decimal_param(order.quantity, "quantity", 4)
                 params["reduceOnly"] = str(order.reduce_only).lower()
             if order.price is not None:
-                params["price"] = order.price
+                params["price"] = decimal_param(order.price, "price", 2)
                 params["timeInForce"] = "GTC"
             if order.stop_price is not None:
-                params["triggerPrice"] = order.stop_price
+                params["triggerPrice"] = decimal_param(order.stop_price, "trigger price", 2)
             if order.close_position:
                 params["closePosition"] = "true"
             return params
@@ -249,10 +256,10 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
             params["quantity"] = order.quantity
             params["reduceOnly"] = str(order.reduce_only).lower()
         if order.price is not None and order.order_type != "MARKET":
-            params["price"] = order.price
+            params["price"] = decimal_param(order.price, "price", 2)
             params["timeInForce"] = "GTC"
         if order.stop_price is not None:
-            params["stopPrice"] = order.stop_price
+            params["stopPrice"] = decimal_param(order.stop_price, "trigger price", 2)
         if order.close_position:
             params["closePosition"] = "true"
         return params
