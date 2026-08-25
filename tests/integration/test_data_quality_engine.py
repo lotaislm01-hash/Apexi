@@ -35,8 +35,8 @@ def test_data_quality_covers_feed_wide_market_components():
     assert "INVALID_VALUE" in engine.validate_event({
         "kind": "funding", "event_time": 1, "value": "bad",
     }).reason_codes
-    assert "RECONNECT" in engine.validate_event({
-        "kind": "feed", "event_time": 1, "reconnect": True,
+    assert "RECONNECT_REQUIRED" in engine.validate_event({
+        "kind": "feed", "event_time": 1, "reconnect": True, "reconnect_required": True,
     }).reason_codes
     assert "TIMEFRAME_MISMATCH" in engine.validate_event(
         {"event_time": 1, "timeframe": "5m"}, timeframe="1m"

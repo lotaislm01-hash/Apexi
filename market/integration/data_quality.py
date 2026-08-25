@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import isfinite
+import json
 from typing import Any, Iterable
 
 
@@ -32,6 +33,11 @@ class DataQualityEngine:
         except (TypeError, ValueError):
             event_time = None
             reasons.append("INVALID_TIMESTAMP")
+        timestamp_unit = str(event.get("timestamp_unit", "")).lower()
+        if event_time is not None and timestamp_unit in {"s", "sec", "seconds"} and event_time >= 1_000_000_000_000:
+            reasons.append("TIMESTAMP_UNIT_MISMATCH")
+        if event_time is not None and timestamp_unit in {"ms", "millisecond", "milliseconds"} and event_time < 1_000_000_000_000:
+            reasons.append("TIMESTAMP_UNIT_MISMATCH")
         if as_of is not None and event_time is not None and event_time > as_of:
             return QualityResult("FUTURE", ("FUTURE_EVENT",), {"event_time": event_time, "as_of": as_of})
         observed_symbol = event.get("symbol")
@@ -82,9 +88,9 @@ class DataQualityEngine:
         if event.get("sequence_regression") or event.get("out_of_order"):
             reasons.append("SEQUENCE_REGRESSION")
         if event.get("conflicting_snapshot"):
-            reasons.append("CONFLICTING_SNAPSHOT")
+            reasons.append("CONFLICTING_RECORD" if event.get("conflicting_record") else "CONFLICTING_SNAPSHOT")
         if event.get("reconnect"):
-            reasons.append("RECONNECT")
+            reasons.append("RECONNECT_REQUIRED" if event.get("reconnect_required") else "RECONNECT")
         if event.get("missing_snapshot"):
             reasons.append("MISSING_SNAPSHOT")
         if kind in {"orderbook", "book", "order_book"}:
@@ -109,7 +115,7 @@ class DataQualityEngine:
         if event.get("missing"):
             return QualityResult("INCOMPLETE", ("MISSING_DATA",))
         if event.get("stale"):
-            return QualityResult("STALE", ("STALE_DATA",))
+            return QualityResult("STALE", ("STALE_EVENT",))
         if reasons:
             return QualityResult("INVALID", tuple(dict.fromkeys(reasons)))
         return QualityResult("VALID")
@@ -120,6 +126,8 @@ class DataQualityEngine:
         previous_time: float | None = None
         for event in events:
             key = event.get("id", event.get("trade_id", event.get("sequence")))
+            if key is not None:
+                key = (str(event.get("kind", event.get("type", ""))).lower(), key)
             result = self.validate_event(event, as_of=as_of, symbol=symbol, timeframe=timeframe)
             if key is not None and key in seen:
                 result = QualityResult("DUPLICATE", ("DUPLICATE_EVENT",))
@@ -130,10 +138,12 @@ class DataQualityEngine:
                 current_time = float(event_time)
             except (TypeError, ValueError):
                 current_time = None
-            if previous_time is not None and current_time is not None and current_time < previous_time:
+            visible = as_of is None or current_time is None or current_time <= as_of
+            if visible and previous_time is not None and current_time is not None and current_time < previous_time:
                 status = result.status if result.status == "DUPLICATE" else "INVALID"
-                result = QualityResult(status, tuple(dict.fromkeys((*result.reason_codes, "NON_MONOTONIC_EVENT_SEQUENCE"))))
-            if current_time is not None:
+                regression_code = "TIMESTAMP_REGRESSION" if event.get("timestamp_regression") else "NON_MONOTONIC_EVENT_SEQUENCE"
+                result = QualityResult(status, tuple(dict.fromkeys((*result.reason_codes, regression_code))))
+            if visible and current_time is not None:
                 previous_time = current_time
             results.append(result)
         return results
