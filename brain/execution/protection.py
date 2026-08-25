@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .model import OrderRequest
+
+
+@dataclass(frozen=True)
+class ProtectionResult:
+    verified: bool
+    stop_loss: float | None
+    take_profit: float | None
+    reason: str | None = None
+
+    def to_dict(self):
+        return dict(vars(self))
+
+
+class ProtectionManager:
+    """Validate and verify protective orders without assuming exchange success."""
+
+    def create_plan(self, intent) -> tuple[OrderRequest, ...]:
+        if not intent.approved:
+            raise ValueError("Protection requires an approved intent")
+        if intent.action == "LONG" and not intent.stop_loss < intent.entry:
+            raise ValueError("Long stop-loss must be below entry")
+        if intent.action == "SHORT" and not intent.stop_loss > intent.entry:
+            raise ValueError("Short stop-loss must be above entry")
+        orders = [OrderRequest.from_intent(intent)]
+        if intent.tp1 is not None:
+            orders.append(OrderRequest(
+                client_order_id=f"{orders[0].client_order_id}-tp1", exchange_order_id=None,
+                symbol=intent.symbol, side="SELL" if intent.action == "LONG" else "BUY",
+                order_type="TAKE_PROFIT", quantity=float(intent.quantity), price=float(intent.tp1),
+                reduce_only=True, close_position=False, leverage=float(intent.leverage),
+                exchange="PAPER", execution_mode=orders[0].execution_mode,
+                parent_client_order_id=orders[0].client_order_id,
+            ))
+        return tuple(orders)
+
+    def verify(self, entry: OrderRequest, protection_orders) -> ProtectionResult:
+        stops = [order for order in protection_orders if order.stop_price is not None]
+        targets = [order for order in protection_orders if order.order_type == "TAKE_PROFIT"]
+        if not stops or not targets:
+            return ProtectionResult(False, None, None, "PROTECTION_MISSING")
+        return ProtectionResult(True, stops[0].stop_price, targets[0].price)

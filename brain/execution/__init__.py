@@ -3,6 +3,11 @@ from .intent import (
     ExecutionIntentBuilder,
 )
 from .paper import PaperExecutionEngine, PaperPosition
+from .adapter import ExchangeExecutionAdapter, InMemoryExecutionAdapter
+from .adapters import BinanceExecutionAdapter, BybitExecutionAdapter, CredentialError
+from .coordinator import ExecutionCoordinator, ExecutionOutcome
+from .model import ExecutionConfig, ExecutionMode, OrderRequest, OrderStatus, PositionSnapshot, ReconciliationResult, deterministic_client_order_id
+from .protection import ProtectionManager, ProtectionResult
 
 
 class LiveExecutionDisabled(RuntimeError):
@@ -37,4 +42,20 @@ __all__ = [
     "LiveExecutionDisabled",
     "PaperExecutionEngine",
     "PaperPosition",
+    "ExchangeExecutionAdapter",
+    "InMemoryExecutionAdapter",
+    "BinanceExecutionAdapter",
+    "BybitExecutionAdapter",
+    "CredentialError",
+    "ExecutionCoordinator",
+    "ExecutionOutcome",
+    "ExecutionConfig",
+    "ExecutionMode",
+    "OrderRequest",
+    "OrderStatus",
+    "PositionSnapshot",
+    "ReconciliationResult",
+    "deterministic_client_order_id",
+    "ProtectionManager",
+    "ProtectionResult",
 ]
