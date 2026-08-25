@@ -93,7 +93,7 @@ class OrderRequest:
             order_type="MARKET",
             quantity=float(intent.quantity),
             price=float(intent.entry),
-            stop_price=float(intent.stop_loss),
+            stop_price=None,
             leverage=float(intent.leverage),
             exchange=exchange.upper(),
             execution_mode=mode,

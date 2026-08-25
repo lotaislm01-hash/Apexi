@@ -17,6 +17,8 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
 
     def __init__(self, exchange: str, config: ExecutionConfig | None = None, transport=None) -> None:
         self.config = config or ExecutionConfig()
+        if self.config.mode is ExecutionMode.LIVE:
+            raise CredentialError("LIVE execution adapters are disabled in P3.2")
         if self.config.mode in {ExecutionMode.TESTNET, ExecutionMode.LIVE}:
             if not self.config.credentials.get("api_key") or not self.config.credentials.get("api_secret"):
                 raise CredentialError(f"{exchange} credentials are required for {self.config.mode.value}")
@@ -169,6 +171,14 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
     def __init__(self, config=None, transport=None):
         super().__init__("BINANCE", config, transport)
 
+    def order_params(self, order):
+        params = {"symbol": order.symbol, "side": order.side, "type": order.order_type, "quantity": order.quantity, "newClientOrderId": order.client_order_id, "reduceOnly": str(order.reduce_only).lower()}
+        if order.price is not None and order.order_type != "MARKET":
+            params["price"] = order.price
+        if order.stop_price is not None:
+            params["stopPrice"] = order.stop_price
+        return params
+
 
 class BybitExecutionAdapter(NormalizingExecutionAdapter):
     account_path = "/v5/account/wallet-balance"
@@ -177,6 +187,47 @@ class BybitExecutionAdapter(NormalizingExecutionAdapter):
     order_path = "/v5/order/create"
     def __init__(self, config=None, transport=None):
         super().__init__("BYBIT", config, transport)
+
+    def order_params(self, order):
+        params = {"category": "linear", "symbol": order.symbol, "side": order.side.title(), "orderType": order.order_type.title(), "qty": str(order.quantity), "orderLinkId": order.client_order_id, "reduceOnly": order.reduce_only, "closeOnTrigger": order.close_position}
+        if order.price is not None and order.order_type != "MARKET":
+            params["price"] = str(order.price)
+        if order.stop_price is not None:
+            params["triggerPrice"] = str(order.stop_price)
+        return params
+
+    def normalize_order(self, response: dict[str, Any]) -> OrderRequest:
+        if isinstance(response.get("result"), dict):
+            values = response["result"].get("list", [])
+            if values:
+                response = values[0]
+        mapped = {
+            "symbol": response.get("symbol"),
+            "orderId": response.get("orderId"),
+            "clientOrderId": response.get("orderLinkId", response.get("clientOrderId")),
+            "side": response.get("side"),
+            "type": response.get("orderType", response.get("type", "Market")).upper(),
+            "origQty": response.get("qty", response.get("origQty", 0)),
+            "executedQty": response.get("cumExecQty", response.get("executedQty", 0)),
+            "avgPrice": response.get("avgPrice"),
+            "status": str(response.get("orderStatus", response.get("status", "NEW"))).upper().replace("PARTIALLYFILLED", "PARTIALLY_FILLED").replace("CANCELLED", "CANCELED"),
+            "price": response.get("price"),
+            "stopPrice": response.get("triggerPrice"),
+            "reduceOnly": response.get("reduceOnly", False),
+            "closePosition": response.get("closeOnTrigger", False),
+        }
+        return super().normalize_order(mapped)
+
+    def normalize_positions(self, payload):
+        values = payload.get("result", {}).get("list", []) if isinstance(payload, dict) else []
+        if not isinstance(values, list):
+            raise ValueError("Malformed Bybit position response")
+        result = []
+        for item in values:
+            size = float(item.get("size", 0))
+            if size:
+                result.append(PositionSnapshot(str(item.get("symbol", "")).upper(), str(item.get("side", "")).upper(), size, float(item.get("avgPrice", 0)) or None, self.exchange))
+        return result
 
 
 __all__ = ["BinanceExecutionAdapter", "BybitExecutionAdapter", "CredentialError"]

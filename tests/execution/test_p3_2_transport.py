@@ -43,6 +43,25 @@ def test_bybit_transport_signs_json_request_and_rejects_production_endpoint():
         AuthenticatedRESTTransport("BYBIT", "key", "secret", "https://api.bybit.com")
 
 
+def test_exchange_specific_order_schemas_and_bybit_response_normalization():
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, credentials={"api_key": "key", "api_secret": "secret"})
+    binance = BinanceExecutionAdapter(config)
+    bybit = BybitExecutionAdapter(config)
+    order = OrderRequest.from_intent(intent(), exchange="BYBIT", mode=ExecutionMode.TESTNET)
+    assert "newClientOrderId" in binance.order_params(order)
+    assert "stopPrice" not in binance.order_params(order)
+    assert bybit.order_params(order)["orderLinkId"] == order.client_order_id
+    assert bybit.order_params(order)["orderType"] == "Market"
+    normalized = bybit.normalize_order({"result": {"list": [{
+        "symbol": "BTCUSDT", "orderId": "b1", "orderLinkId": "apex-b1",
+        "side": "Sell", "orderType": "Market", "qty": "100", "cumExecQty": "30",
+        "avgPrice": "101", "orderStatus": "PartiallyFilled",
+    }]}})
+    assert normalized.client_order_id == "apex-b1"
+    assert normalized.status is OrderStatus.PARTIALLY_FILLED
+    assert normalized.filled_quantity == 30
+
+
 def test_transport_normalizes_failures_without_secrets():
     def opener(*_args, **_kwargs):
         raise TimeoutError("secret should not appear")
@@ -77,3 +96,9 @@ def test_order_state_machine_rejects_terminal_regressions():
     machine.transition(OrderStatus.FILLED)
     with pytest.raises(ValueError):
         machine.transition(OrderStatus.NEW)
+
+
+def test_live_adapters_are_disabled_even_with_credentials():
+    config = ExecutionConfig(mode=ExecutionMode.LIVE, live_enabled=True, credentials={"api_key": "key", "api_secret": "secret"})
+    with pytest.raises(ValueError, match="LIVE execution adapters are disabled"):
+        BinanceExecutionAdapter(config)
