@@ -87,6 +87,19 @@ def test_binance_algo_response_normalizes_client_and_trigger_fields():
     assert order.status is OrderStatus.NEW
 
 
+def test_binance_open_orders_includes_algo_orders():
+    def request(method, path, params):
+        if path == "/fapi/v1/openOrders":
+            return []
+        if path == "/fapi/v1/openAlgoOrders":
+            return {"orders": [{"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "type": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"}]}
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    orders = BinanceExecutionAdapter(config, transport=request).get_open_orders()
+    assert [order.client_order_id for order in orders] == ["sl"]
+
+
 def test_binance_close_position_translation_omits_incompatible_fields():
     config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
     adapter = BinanceExecutionAdapter(config)

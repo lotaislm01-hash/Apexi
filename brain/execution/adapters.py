@@ -205,6 +205,7 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
     cancel_path = "/fapi/v1/order"
     amend_path = "/fapi/v1/order"
     algo_order_path = "/fapi/v1/algoOrder"
+    algo_open_orders_path = "/fapi/v1/openAlgoOrders"
 
     def __init__(self, config=None, transport=None):
         super().__init__("BINANCE", config, transport)
@@ -221,6 +222,11 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
 
     def cancel_path_for(self, client_order_id):
         return self.algo_order_path if client_order_id in self._algo_client_order_ids else super().cancel_path_for(client_order_id)
+
+    def get_open_orders(self):
+        regular = super().get_open_orders()
+        payload = self._testnet_request("GET", self.algo_open_orders_path, {"symbol": self.config.symbol or "BTCUSDT"})
+        return regular + self.normalize_orders(payload)
 
     def order_params(self, order):
         if order.order_type in {"STOP_MARKET", "TAKE_PROFIT"}:
