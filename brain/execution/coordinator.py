@@ -27,6 +27,7 @@ class ExecutionCoordinator:
         self.config = config or ExecutionConfig()
         self._requests: dict[str, str] = {}
         self.ledger = ledger or ExecutionLedger()
+        self.last_transport_error: ExecutionTransportError | None = None
 
     def submit_intent(self, intent, *, as_of: float | None = None, now: float = 0.0) -> ExecutionOutcome:
         if not intent.approved:
@@ -70,7 +71,8 @@ class ExecutionCoordinator:
         self.ledger.record("EXECUTION_APPROVED", client_order_id=order.client_order_id, event_time=now, exchange=self.adapter.exchange)
         try:
             submitted = self.adapter.submit_order(order)
-        except (TimeoutError, ConnectionError, ExecutionTransportError):
+        except (TimeoutError, ConnectionError, ExecutionTransportError) as error:
+            self.last_transport_error = error if isinstance(error, ExecutionTransportError) else None
             try:
                 existing = self.adapter.get_order(order.client_order_id)
             except (TimeoutError, ConnectionError, ExecutionTransportError):
@@ -104,7 +106,8 @@ class ExecutionCoordinator:
         self._requests[order.client_order_id] = str(order.to_dict())
         try:
             submitted = self.adapter.submit_order(order)
-        except (TimeoutError, ConnectionError, ExecutionTransportError):
+        except (TimeoutError, ConnectionError, ExecutionTransportError) as error:
+            self.last_transport_error = error if isinstance(error, ExecutionTransportError) else None
             try:
                 existing = self.adapter.get_order(order.client_order_id)
             except (TimeoutError, ConnectionError, ExecutionTransportError):

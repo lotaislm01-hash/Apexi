@@ -8,6 +8,7 @@ from brain.execution import (
     BinanceExecutionAdapter,
     BybitExecutionAdapter,
     ExecutionConfig,
+    ExecutionCoordinator,
     ExecutionMode,
     ExecutionTransportError,
     OrderRequest,
@@ -124,6 +125,33 @@ def test_transport_normalizes_failures_without_secrets():
         transport.request("GET", "/fapi/v2/account")
     assert error.value.category == "TIMEOUT"
     assert "secret" not in str(error.value)
+
+
+def test_transport_preserves_sanitized_exchange_error_details():
+    def opener(*_args, **_kwargs):
+        raise HTTPError("https://testnet.binancefuture.com", 400, "bad order", {}, None)
+
+    transport = AuthenticatedRESTTransport("BINANCE", "key", "secret", "https://testnet.binancefuture.com", opener=opener)
+    with pytest.raises(ExecutionTransportError) as error:
+        transport.request("POST", "/fapi/v1/order", {"symbol": "BTCUSDT"})
+    assert error.value.exchange_code is None
+    assert error.value.exchange_message is None
+
+
+def test_coordinator_retains_sanitized_submission_error_without_retry():
+    def request(method, path, params):
+        if method == "POST":
+            raise ExecutionTransportError("HTTP_ERROR", "Exchange HTTP request failed", exchange_code="-2021", exchange_message="Order would immediately trigger.")
+        raise ExecutionTransportError("HTTP_ERROR", "Exchange HTTP request failed", exchange_code="-2013", exchange_message="Order does not exist.")
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config, transport=request)
+    coordinator = ExecutionCoordinator(adapter, config)
+    order = OrderRequest("diag-sl", None, "BTCUSDT", "SELL", "STOP_MARKET", 0.1, stop_price=98, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    outcome = coordinator.submit_order_request(order)
+    assert outcome.status == "UNKNOWN"
+    assert coordinator.last_transport_error.exchange_code == "-2021"
+    assert coordinator.last_transport_error.exchange_message == "Order would immediately trigger."
 
 
 def test_transport_timeout_enters_unknown_without_blind_resubmission():

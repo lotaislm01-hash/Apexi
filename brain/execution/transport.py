@@ -12,10 +12,11 @@ from urllib.request import Request, urlopen
 
 
 class ExecutionTransportError(RuntimeError):
-    def __init__(self, category: str, message: str, *, exchange_code: str | None = None):
+    def __init__(self, category: str, message: str, *, exchange_code: str | None = None, exchange_message: str | None = None):
         super().__init__(message)
         self.category = category
         self.exchange_code = exchange_code
+        self.exchange_message = exchange_message
 
 
 @dataclass(frozen=True)
@@ -90,9 +91,11 @@ class AuthenticatedRESTTransport:
             try:
                 payload = json.loads(error.read().decode())
                 code = str(payload.get("code", payload.get("retCode", "")))
+                exchange_message = str(payload.get("msg", payload.get("retMsg", "")))
             except (ValueError, json.JSONDecodeError):
                 code = None
-            raise ExecutionTransportError("HTTP_ERROR", "Exchange HTTP request failed", exchange_code=code) from None
+                exchange_message = None
+            raise ExecutionTransportError("HTTP_ERROR", "Exchange HTTP request failed", exchange_code=code, exchange_message=exchange_message) from None
         except TimeoutError:
             raise ExecutionTransportError("TIMEOUT", "Exchange request timed out") from None
         except URLError:
