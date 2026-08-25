@@ -8,6 +8,8 @@ from .adapters import BinanceExecutionAdapter, BybitExecutionAdapter, Credential
 from .coordinator import ExecutionCoordinator, ExecutionOutcome
 from .model import ExecutionConfig, ExecutionMode, OrderRequest, OrderStatus, PositionSnapshot, ReconciliationResult, deterministic_client_order_id
 from .protection import ProtectionManager, ProtectionResult
+from .lifecycle import ExecutionEvent, ExecutionLedger
+from .paper_adapter import PaperExecutionAdapter
 
 
 class LiveExecutionDisabled(RuntimeError):
@@ -58,4 +60,7 @@ __all__ = [
     "deterministic_client_order_id",
     "ProtectionManager",
     "ProtectionResult",
+    "ExecutionEvent",
+    "ExecutionLedger",
+    "PaperExecutionAdapter",
 ]

@@ -25,7 +25,7 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
     def submit_order(self, order):
         if self.config.mode in {ExecutionMode.TESTNET, ExecutionMode.LIVE} and self.transport is None:
             raise ConnectionError("network transport is not configured")
-        if self.transport is not None:
+        if self.config.mode in {ExecutionMode.TESTNET, ExecutionMode.LIVE} and self.transport is not None:
             response = self.transport("submit_order", order.to_dict())
             return self.normalize_order(response)
         return super().submit_order(order)

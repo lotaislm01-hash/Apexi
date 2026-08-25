@@ -11,7 +11,7 @@ import websockets
 class ControlCenter:
     """Read-only dashboard/API projection of canonical APEX state."""
 
-    def snapshot(self, pipeline_result, paper_position=None) -> dict[str, Any]:
+    def snapshot(self, pipeline_result, paper_position=None, execution_state=None) -> dict[str, Any]:
         context = pipeline_result.context
         decision = pipeline_result.decision
         risk = pipeline_result.risk
@@ -41,6 +41,7 @@ class ControlCenter:
             "observability": self._serialize(getattr(context, "observability", None)),
             "data_quality": self._serialize(getattr(context, "data_quality", None)),
             "feed": getattr(context, "metadata", {}).get("feed_continuity", "UNKNOWN"),
+            "execution": self._serialize(execution_state),
         }
 
     @staticmethod
@@ -69,9 +70,10 @@ class DashboardService:
         "/feed": "feed",
     }
 
-    def __init__(self, result_provider, paper_position_provider=None) -> None:
+    def __init__(self, result_provider, paper_position_provider=None, execution_state_provider=None) -> None:
         self.result_provider = result_provider
         self.paper_position_provider = paper_position_provider
+        self.execution_state_provider = execution_state_provider
         self.control_center = ControlCenter()
 
     def get(self, path: str) -> dict[str, Any]:
@@ -84,7 +86,11 @@ class DashboardService:
         result = self.result_provider()
         if result is None:
             return {"status": "unavailable"}
-        snapshot = self.control_center.snapshot(result, self.paper_position_provider() if self.paper_position_provider else None)
+        snapshot = self.control_center.snapshot(
+            result,
+            self.paper_position_provider() if self.paper_position_provider else None,
+            self.execution_state_provider() if self.execution_state_provider else None,
+        )
         key = self._routes[path]
         if key == "data_quality":
             return {key: snapshot.get("data_quality", snapshot.get("observability"))}
@@ -153,8 +159,8 @@ class DashboardWebSocket:
 class DashboardWebSocketServer:
     """Network read-only WebSocket projection backed by the HTTP service state."""
 
-    def __init__(self, result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
-        self.service = DashboardService(result_provider, paper_position_provider)
+    def __init__(self, result_provider, paper_position_provider=None, host="127.0.0.1", port=0, execution_state_provider=None):
+        self.service = DashboardService(result_provider, paper_position_provider, execution_state_provider)
         self.host = host
         self.port = port
         self._server = None
@@ -185,14 +191,14 @@ class DashboardWebSocketServer:
             self._server = None
 
 
-def create_app(result_provider, paper_position_provider=None) -> DashboardService:
+def create_app(result_provider, paper_position_provider=None, execution_state_provider=None) -> DashboardService:
     """Create the dependency-free read-only control-center service."""
-    return DashboardService(result_provider, paper_position_provider)
+    return DashboardService(result_provider, paper_position_provider, execution_state_provider)
 
 
-def create_http_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
-    return DashboardHTTPServer((host, port), create_app(result_provider, paper_position_provider))
+def create_http_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0, execution_state_provider=None):
+    return DashboardHTTPServer((host, port), create_app(result_provider, paper_position_provider, execution_state_provider))
 
 
-def create_websocket_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
-    return DashboardWebSocketServer(result_provider, paper_position_provider, host, port)
+def create_websocket_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0, execution_state_provider=None):
+    return DashboardWebSocketServer(result_provider, paper_position_provider, host, port, execution_state_provider)

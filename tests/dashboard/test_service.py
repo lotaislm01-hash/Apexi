@@ -20,12 +20,13 @@ def result():
 
 
 def test_dashboard_service_exposes_canonical_read_only_routes():
-    app = create_app(lambda: result())
+    app = create_app(lambda: result(), execution_state_provider=lambda: {"mode": "PAPER", "healthy": True})
     assert app.get("/health")["read_only"] is True
     assert app.get("/snapshot")["symbol"] == "BTCUSDT"
     assert app.get("/decision")["decision"]["action"] == "WAIT"
     assert app.get("/risk")["risk"]["approved"] is False
     assert app.get("/observability")["observability"] is None
+    assert app.get("/snapshot")["execution"] == {"mode": "PAPER", "healthy": True}
 
 
 def test_dashboard_service_rejects_order_mutation_routes():
