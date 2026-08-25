@@ -69,11 +69,22 @@ def test_binance_protection_translation_preserves_trigger_and_quantity_semantics
     adapter = BinanceExecutionAdapter(config)
     stop = OrderRequest("stop", None, "BTCUSDT", "SELL", "STOP_MARKET", 0.1, stop_price=98, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
     take_profit = OrderRequest("tp", None, "BTCUSDT", "SELL", "TAKE_PROFIT", 0.1, price=104, stop_price=104, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
-    assert adapter.order_params(stop) == {"symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "newClientOrderId": "stop", "quantity": 0.1, "reduceOnly": "true", "stopPrice": 98}
+    assert adapter.order_submission_path(stop) == "/fapi/v1/algoOrder"
+    assert adapter.order_params(stop) == {"algoType": "CONDITIONAL", "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "clientAlgoId": "stop", "quantity": 0.1, "reduceOnly": "true", "triggerPrice": 98}
     assert adapter.order_params(take_profit)["type"] == "TAKE_PROFIT"
-    assert adapter.order_params(take_profit)["stopPrice"] == 104
+    assert adapter.order_params(take_profit)["triggerPrice"] == 104
     assert adapter.order_params(take_profit)["side"] == "SELL"
     assert adapter.order_params(take_profit)["quantity"] == 0.1
+
+
+def test_binance_algo_response_normalizes_client_and_trigger_fields():
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config)
+    order = adapter.normalize_order({"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "type": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"})
+    assert order.exchange_order_id == "algo-1"
+    assert order.client_order_id == "sl"
+    assert order.stop_price == 98
+    assert order.status is OrderStatus.NEW
 
 
 def test_binance_close_position_translation_omits_incompatible_fields():
@@ -85,9 +96,10 @@ def test_binance_close_position_translation_omits_incompatible_fields():
     tp_params = adapter.order_params(close_tp)
     assert stop_params["closePosition"] == "true"
     assert "quantity" not in stop_params and "reduceOnly" not in stop_params
-    assert stop_params["stopPrice"] == 98
+    assert stop_params["triggerPrice"] == 98
     assert tp_params["type"] == "TAKE_PROFIT_MARKET"
     assert tp_params["closePosition"] == "true"
+    assert tp_params["triggerPrice"] == 104
     assert "quantity" not in tp_params and "reduceOnly" not in tp_params
 
 

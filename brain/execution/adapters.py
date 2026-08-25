@@ -97,25 +97,34 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
         if self.config.mode in {ExecutionMode.TESTNET, ExecutionMode.LIVE}:
             if self.transport is None:
                 raise ConnectionError("network transport is not configured")
-            normalized = self.normalize_order(self._testnet_request("POST", self.order_path, self.order_params(order)))
+            normalized = self.normalize_order(self._testnet_request("POST", self.order_submission_path(order), self.order_params(order)))
             if normalized.status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED} and not order.reduce_only:
                 self.positions = [PositionSnapshot(normalized.symbol, "LONG" if normalized.side == "BUY" else "SHORT", normalized.filled_quantity, normalized.average_fill_price, self.exchange)]
             return normalized
         return super().submit_order(order)
 
     def get_order(self, client_order_id):
-        payload = self._testnet_request("GET", self.order_query_path, self.order_query_params(client_order_id))
+        payload = self._testnet_request("GET", self.order_query_path_for(client_order_id), self.order_query_params(client_order_id))
         orders = self.normalize_orders(payload)
         return orders[0] if orders else None
 
     def cancel_order(self, client_order_id):
-        return self.normalize_order(self._testnet_request("DELETE", self.cancel_path, self.order_query_params(client_order_id)))
+        return self.normalize_order(self._testnet_request("DELETE", self.cancel_path_for(client_order_id), self.order_query_params(client_order_id)))
 
     def amend_order(self, order):
         return self.normalize_order(self._testnet_request("PUT", self.amend_path, self.order_params(order)))
 
     def order_query_params(self, client_order_id):
         return {"origClientOrderId": client_order_id}
+
+    def order_submission_path(self, order):
+        return self.order_path
+
+    def order_query_path_for(self, client_order_id):
+        return self.order_query_path
+
+    def cancel_path_for(self, client_order_id):
+        return self.cancel_path
 
     def normalize_account(self, payload):
         if not isinstance(payload, dict):
@@ -157,7 +166,7 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
     def normalize_order(self, response: dict[str, Any]) -> OrderRequest:
         if not isinstance(response, dict) or not response.get("symbol"):
             raise ValueError("Malformed exchange order response")
-        status = str(response.get("status", "NEW")).upper()
+        status = str(response.get("status", response.get("algoStatus", "NEW"))).upper()
         try:
             order_status = OrderStatus(status)
         except ValueError:
@@ -167,14 +176,14 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
             return None if value in (None, "", "None", "null") else float(value)
 
         return OrderRequest(
-            client_order_id=str(response.get("clientOrderId", response.get("client_order_id", ""))),
-            exchange_order_id=str(response.get("orderId", response.get("order_id"))) if response.get("orderId", response.get("order_id")) is not None else None,
+            client_order_id=str(response.get("clientOrderId", response.get("clientAlgoId", response.get("client_order_id", "")))),
+            exchange_order_id=str(response.get("orderId", response.get("algoId", response.get("order_id")))) if response.get("orderId", response.get("algoId", response.get("order_id"))) is not None else None,
             symbol=str(response["symbol"]).upper(),
             side=str(response.get("side", "")).upper(),
             order_type=str(response.get("type", response.get("order_type", "MARKET"))).upper(),
             quantity=float(response.get("origQty", response.get("quantity", 0))),
             price=number("price"),
-            stop_price=number("stopPrice"),
+            stop_price=number("stopPrice", response.get("triggerPrice")),
             reduce_only=bool(response.get("reduceOnly", response.get("reduce_only", False))),
             close_position=bool(response.get("closePosition", response.get("close_position", False))),
             leverage=float(response.get("leverage", 1)),
@@ -195,10 +204,39 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
     order_query_path = "/fapi/v1/order"
     cancel_path = "/fapi/v1/order"
     amend_path = "/fapi/v1/order"
+    algo_order_path = "/fapi/v1/algoOrder"
+
     def __init__(self, config=None, transport=None):
         super().__init__("BINANCE", config, transport)
+        self._algo_client_order_ids = set()
+
+    def order_submission_path(self, order):
+        if order.order_type in {"STOP_MARKET", "TAKE_PROFIT"}:
+            self._algo_client_order_ids.add(order.client_order_id)
+            return self.algo_order_path
+        return super().order_submission_path(order)
+
+    def order_query_path_for(self, client_order_id):
+        return self.algo_order_path if client_order_id in self._algo_client_order_ids else super().order_query_path_for(client_order_id)
+
+    def cancel_path_for(self, client_order_id):
+        return self.algo_order_path if client_order_id in self._algo_client_order_ids else super().cancel_path_for(client_order_id)
 
     def order_params(self, order):
+        if order.order_type in {"STOP_MARKET", "TAKE_PROFIT"}:
+            order_type = "TAKE_PROFIT_MARKET" if order.order_type == "TAKE_PROFIT" and order.close_position else order.order_type
+            params = {"algoType": "CONDITIONAL", "symbol": order.symbol, "side": order.side, "type": order_type, "clientAlgoId": order.client_order_id}
+            if not order.close_position:
+                params["quantity"] = order.quantity
+                params["reduceOnly"] = str(order.reduce_only).lower()
+            if order.price is not None:
+                params["price"] = order.price
+                params["timeInForce"] = "GTC"
+            if order.stop_price is not None:
+                params["triggerPrice"] = order.stop_price
+            if order.close_position:
+                params["closePosition"] = "true"
+            return params
         order_type = "TAKE_PROFIT_MARKET" if order.order_type == "TAKE_PROFIT" and order.close_position else order.order_type
         params = {"symbol": order.symbol, "side": order.side, "type": order_type, "newClientOrderId": order.client_order_id}
         if not order.close_position:
@@ -214,6 +252,8 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         return params
 
     def order_query_params(self, client_order_id):
+        if client_order_id in self._algo_client_order_ids:
+            return {"symbol": self.config.symbol or "BTCUSDT", "clientAlgoId": client_order_id}
         return {"symbol": self.config.symbol or "BTCUSDT", "origClientOrderId": client_order_id}
 
 
