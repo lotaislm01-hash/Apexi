@@ -90,6 +90,18 @@ def test_binance_close_position_translation_omits_incompatible_fields():
     assert "quantity" not in tp_params and "reduceOnly" not in tp_params
 
 
+def test_testnet_reconciliation_reads_remote_positions():
+    def request(method, path, params):
+        if method == "GET" and path == "/fapi/v1/positionRisk":
+            return {"positions": [{"symbol": "BTCUSDT", "positionAmt": "0", "entryPrice": "0"}]}
+        return []
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    result = BinanceExecutionAdapter(config, transport=request).reconcile()
+    assert result.status == "MATCH"
+    assert result.actual is None
+
+
 def test_invalid_protection_contracts_are_rejected():
     with pytest.raises(ValueError):
         OrderRequest("bad-trigger", None, "BTCUSDT", "SELL", "STOP_MARKET", 1)

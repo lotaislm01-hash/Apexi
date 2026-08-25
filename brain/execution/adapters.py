@@ -71,6 +71,25 @@ class NormalizingExecutionAdapter(InMemoryExecutionAdapter):
         payload = self._testnet_request("GET", self.open_orders_path)
         return self.normalize_orders(payload)
 
+    def reconcile(self, expected=None):
+        actual = self.get_positions() if self.config.mode is ExecutionMode.TESTNET else list(self.positions)
+        actual_position = actual[0] if actual else None
+        discrepancies = []
+        if expected and actual_position is None:
+            discrepancies.append("MISSING_POSITION")
+        if expected and actual_position:
+            if expected.symbol != actual_position.symbol:
+                discrepancies.append("SYMBOL_MISMATCH")
+            if expected.side != actual_position.side:
+                discrepancies.append("SIDE_MISMATCH")
+            if expected.quantity != actual_position.quantity:
+                discrepancies.append("QUANTITY_MISMATCH")
+            if expected.average_price != actual_position.average_price:
+                discrepancies.append("AVERAGE_PRICE_MISMATCH")
+        if not expected and actual_position:
+            discrepancies.append("UNEXPECTED_POSITION")
+        return ReconciliationResult("MATCH" if not discrepancies else "DISCREPANCY", tuple(discrepancies), expected, actual_position)
+
     def get_instrument_metadata(self, symbol):
         return {"symbol": symbol.upper()}
 
