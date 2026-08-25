@@ -4,10 +4,14 @@ from brain.decision import DecisionEngine
 from brain.llm import SafeMockLLMProvider
 from brain.memory import BrainMemory
 from brain.reasoning import ApexReasoner
-from brain.risk import RiskGate
+from brain.risk import RiskConfig, RiskGate
+from config.runtime import RiskProfile, RuntimeConfig
 
 
 def main() -> None:
+
+    runtime = RuntimeConfig.from_env()
+    risk_config = RiskConfig.conservative(account_size=runtime.account_size_usd) if runtime.risk_profile is RiskProfile.CONSERVATIVE else RiskConfig.aggressive(account_size=runtime.account_size_usd)
 
     # ==========================================
     # SIMULATED MARKET STATE
@@ -99,14 +103,7 @@ def main() -> None:
     # RISK GATE
     # ==========================================
 
-    risk_gate = RiskGate(
-        account_size=500.0,
-        risk_per_trade_pct=1.0,
-        max_leverage=5.0,
-        max_concurrent_positions=2,
-        daily_drawdown_kill_pct=3.0,
-        min_confidence=75.0,
-    )
+    risk_gate = RiskGate(config=risk_config)
 
     risk = risk_gate.evaluate(
         decision=decision,

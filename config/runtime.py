@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from enum import Enum
+
+
+class RuntimeMode(str, Enum):
+    PAPER = "PAPER"
+    TESTNET = "TESTNET"
+    LIVE = "LIVE"
+
+
+class RiskProfile(str, Enum):
+    CONSERVATIVE = "conservative"
+    AGGRESSIVE = "aggressive"
+
+
+BINANCE_TESTNET_ENDPOINT = "https://testnet.binancefuture.com"
+BINANCE_PRODUCTION_ENDPOINT = "https://fapi.binance.com"
+BINANCE_TESTNET_API_KEY = "BINANCE_TESTNET_API_KEY"
+BINANCE_TESTNET_API_SECRET = "BINANCE_TESTNET_API_SECRET"
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    mode: RuntimeMode = RuntimeMode.PAPER
+    exchange: str = "PAPER"
+    base_url: str | None = None
+    risk_profile: RiskProfile = RiskProfile.CONSERVATIVE
+    account_size_usd: float = 500.0
+    scanner_interval_seconds: int = 15
+    live_enabled: bool = False
+    live_confirmation: str | None = None
+    api_key: str | None = None
+    api_secret: str | None = None
+
+    @classmethod
+    def from_env(cls, environ: dict[str, str] | None = None) -> "RuntimeConfig":
+        values = os.environ if environ is None else environ
+        mode = RuntimeMode(values.get("APEX_MODE", "PAPER").strip().upper())
+        exchange = values.get("APEX_EXCHANGE", "PAPER").strip().upper()
+        profile = RiskProfile(values.get("APEX_RISK_PROFILE", "conservative").strip().lower())
+        account_size = float(values.get("APEX_ACCOUNT_SIZE_USD", "500"))
+        interval = int(values.get("APEX_SCANNER_INTERVAL_SECONDS", "15"))
+        live_enabled = _parse_bool(values.get("APEX_LIVE_ENABLED", "false"))
+        live_confirmation = values.get("APEX_LIVE_CONFIRMATION")
+        base_url = values.get("APEX_BASE_URL")
+        if account_size <= 0 or interval <= 0:
+            raise ValueError("Account size and scanner interval must be positive")
+
+        if mode is RuntimeMode.PAPER:
+            if exchange != "PAPER":
+                raise ValueError("PAPER mode requires exchange=PAPER")
+            if base_url:
+                raise ValueError("PAPER mode cannot configure an exchange endpoint")
+            return cls(mode, exchange, None, profile, account_size, interval, False, None, None, None)
+
+        if exchange != "BINANCE":
+            raise ValueError("Only Binance is enabled by this runtime configuration")
+        if mode is RuntimeMode.TESTNET:
+            if base_url != BINANCE_TESTNET_ENDPOINT:
+                raise ValueError("TESTNET requires the official Binance TESTNET endpoint")
+            if live_enabled:
+                raise ValueError("TESTNET cannot enable LIVE execution")
+            return cls(mode, exchange, base_url, profile, account_size, interval, False,
+                       None, values.get(BINANCE_TESTNET_API_KEY), values.get(BINANCE_TESTNET_API_SECRET))
+
+        if not live_enabled or live_confirmation != "ENABLE_LIVE_TRADING":
+            raise ValueError("LIVE requires explicit enablement and confirmation")
+        if base_url != BINANCE_PRODUCTION_ENDPOINT:
+            raise ValueError("LIVE requires the explicitly whitelisted Binance production endpoint")
+        return cls(mode, exchange, base_url, profile, account_size, interval, True,
+                   live_confirmation, values.get("BINANCE_API_KEY"), values.get("BINANCE_API_SECRET"))
+
+    def require_credentials(self) -> None:
+        if self.mode is RuntimeMode.PAPER:
+            return
+        if not self.api_key or not self.api_secret:
+            raise ValueError(f"{self.exchange} credentials are required for {self.mode.value}")
+
+    def redacted(self) -> dict[str, object]:
+        return {
+            "mode": self.mode.value,
+            "exchange": self.exchange,
+            "base_url": self.base_url,
+            "risk_profile": self.risk_profile.value,
+            "account_size_usd": self.account_size_usd,
+            "scanner_interval_seconds": self.scanner_interval_seconds,
+            "live_enabled": self.live_enabled,
+            "has_api_key": bool(self.api_key),
+            "has_api_secret": bool(self.api_secret),
+        }
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("Boolean configuration values must be true or false")
