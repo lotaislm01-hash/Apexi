@@ -235,13 +235,17 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         return list(unique.values())
 
     def normalize_orders(self, payload):
-        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        if isinstance(payload, dict) and "data" in payload:
             payload = payload["data"]
+            if isinstance(payload, dict):
+                payload = [payload]
         return super().normalize_orders(payload)
 
     def normalize_order(self, response):
         if isinstance(response, dict) and isinstance(response.get("data"), dict):
             response = response["data"]
+        elif isinstance(response, dict) and isinstance(response.get("data"), list):
+            response = response["data"][0] if response["data"] else {}
         if not isinstance(response, dict):
             raise ValueError("Malformed Binance Algo response")
         mapped = dict(response)
@@ -259,7 +263,18 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         mapped["type"] = mapped.get("orderType", mapped.get("type"))
         if mapped["type"] is None and context is not None:
             mapped["type"] = context.order_type
-        mapped["status"] = mapped.get("algoStatus", mapped.get("status", "NEW"))
+        status = str(mapped.get("algoStatus", mapped.get("status", "NEW"))).upper()
+        mapped["status"] = {
+            "NEW": "NEW",
+            "TRIGGERED": "ACKNOWLEDGED",
+            "EXECUTING": "ACKNOWLEDGED",
+            "PARTIALLY_FILLED": "PARTIALLY_FILLED",
+            "FILLED": "FILLED",
+            "CANCELED": "CANCELED",
+            "CANCELLED": "CANCELED",
+            "EXPIRED": "EXPIRED",
+            "REJECTED": "REJECTED",
+        }.get(status, "UNKNOWN")
         mapped["clientOrderId"] = mapped.get("clientAlgoId", mapped.get("clientOrderId"))
         mapped["orderId"] = mapped.get("algoId", mapped.get("orderId"))
         mapped["stopPrice"] = mapped.get("triggerPrice", mapped.get("stopPrice"))

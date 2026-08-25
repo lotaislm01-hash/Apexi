@@ -104,6 +104,48 @@ def test_binance_algo_creation_identifier_only_response_uses_request_context():
     assert normalized.stop_price == 98
 
 
+def test_binance_tp_algo_query_accepts_wrapped_list_and_uses_algo_id():
+    calls = []
+
+    def request(method, path, params):
+        calls.append((method, path, params))
+        if method == "POST":
+            return {"code": 200, "msg": "success", "data": {"algoId": "tp-algo", "clientAlgoId": "tp-2"}}
+        return {"code": 200, "data": [{"algoId": "tp-algo", "clientAlgoId": "tp-2", "symbol": "BTCUSDT", "side": "SELL", "orderType": "TAKE_PROFIT", "algoStatus": "NEW", "triggerPrice": "104", "price": "104", "quantity": "0.1", "reduceOnly": True}]}
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config, transport=request)
+    tp = OrderRequest("tp-2", None, "BTCUSDT", "SELL", "TAKE_PROFIT", 0.1, price=104, stop_price=104, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    adapter.submit_order(tp)
+    queried = adapter.get_order("tp-2")
+    assert queried.client_order_id == "tp-2"
+    assert queried.exchange_order_id == "tp-algo"
+    assert queried.order_type == "TAKE_PROFIT"
+    assert queried.stop_price == 104
+    assert calls[-1] == ("GET", "/fapi/v1/algoOrder", {"algoId": "tp-algo"})
+
+
+def test_binance_algo_cancel_uses_algo_id_and_normalizes_identifier_only_response():
+    calls = []
+
+    def request(method, path, params):
+        calls.append((method, path, params))
+        if method == "POST":
+            return {"code": 200, "msg": "success", "data": {"algoId": "sl-algo", "clientAlgoId": "sl-3"}}
+        if method == "DELETE":
+            return {"code": 200, "msg": "success", "data": {"algoId": "sl-algo", "clientAlgoId": "sl-3", "algoStatus": "CANCELED"}}
+        return {"code": 200, "data": [{"algoId": "sl-algo", "clientAlgoId": "sl-3", "symbol": "BTCUSDT", "side": "SELL", "orderType": "STOP_MARKET", "algoStatus": "CANCELED", "triggerPrice": "98", "quantity": "0.1"}]}
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config, transport=request)
+    sl = OrderRequest("sl-3", None, "BTCUSDT", "SELL", "STOP_MARKET", 0.1, stop_price=98, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    adapter.submit_order(sl)
+    canceled = adapter.cancel_order("sl-3")
+    assert canceled.exchange_order_id == "sl-algo"
+    assert canceled.status is OrderStatus.CANCELED
+    assert calls[-1] == ("DELETE", "/fapi/v1/algoOrder", {"algoId": "sl-algo"})
+
+
 def test_binance_rejects_over_precision_protection_values_instead_of_rounding():
     config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
     adapter = BinanceExecutionAdapter(config)
