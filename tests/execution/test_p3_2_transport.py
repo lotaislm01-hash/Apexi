@@ -80,11 +80,28 @@ def test_binance_protection_translation_preserves_trigger_and_quantity_semantics
 def test_binance_algo_response_normalizes_client_and_trigger_fields():
     config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
     adapter = BinanceExecutionAdapter(config)
-    order = adapter.normalize_order({"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "type": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"})
+    order = adapter.normalize_order({"code": 0, "msg": "", "data": {"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "orderType": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"}})
     assert order.exchange_order_id == "algo-1"
     assert order.client_order_id == "sl"
     assert order.stop_price == 98
     assert order.status is OrderStatus.NEW
+    assert adapter.order_query_params("sl") == {"algoId": "algo-1"}
+
+
+def test_binance_algo_creation_identifier_only_response_uses_request_context():
+    def request(method, path, params):
+        assert method == "POST"
+        assert path == "/fapi/v1/algoOrder"
+        return {"code": 0, "msg": "success", "data": {"algoId": "algo-2", "clientAlgoId": "sl-2"}}
+
+    config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})
+    adapter = BinanceExecutionAdapter(config, transport=request)
+    order = OrderRequest("sl-2", None, "BTCUSDT", "SELL", "STOP_MARKET", 0.1, stop_price=98, reduce_only=True, exchange="BINANCE", execution_mode=ExecutionMode.TESTNET)
+    normalized = adapter.submit_order(order)
+    assert normalized.symbol == "BTCUSDT"
+    assert normalized.exchange_order_id == "algo-2"
+    assert normalized.client_order_id == "sl-2"
+    assert normalized.stop_price == 98
 
 
 def test_binance_rejects_over_precision_protection_values_instead_of_rounding():
@@ -100,7 +117,7 @@ def test_binance_open_orders_includes_algo_orders():
         if path == "/fapi/v1/openOrders":
             return []
         if path == "/fapi/v1/openAlgoOrders":
-            return {"orders": [{"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "type": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"}]}
+            return {"code": 0, "msg": "", "data": [{"symbol": "BTCUSDT", "algoId": "algo-1", "clientAlgoId": "sl", "side": "SELL", "orderType": "STOP_MARKET", "quantity": "0.1", "triggerPrice": "98", "algoStatus": "NEW"}]}
         raise AssertionError(f"unexpected request: {method} {path}")
 
     config = ExecutionConfig(mode=ExecutionMode.TESTNET, symbol="BTCUSDT", credentials={"api_key": "key", "api_secret": "secret"})

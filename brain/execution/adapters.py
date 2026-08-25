@@ -210,24 +210,66 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
 
     def __init__(self, config=None, transport=None):
         super().__init__("BINANCE", config, transport)
-        self._algo_client_order_ids = set()
+        self._algo_order_ids = {}
+        self._algo_order_requests = {}
 
     def order_submission_path(self, order):
         if order.order_type in {"STOP_MARKET", "TAKE_PROFIT"}:
-            self._algo_client_order_ids.add(order.client_order_id)
+            self._algo_order_requests[order.client_order_id] = order
             return self.algo_order_path
         return super().order_submission_path(order)
 
     def order_query_path_for(self, client_order_id):
-        return self.algo_order_path if client_order_id in self._algo_client_order_ids else super().order_query_path_for(client_order_id)
+        return self.algo_order_path if client_order_id in self._algo_order_ids else super().order_query_path_for(client_order_id)
 
     def cancel_path_for(self, client_order_id):
-        return self.algo_order_path if client_order_id in self._algo_client_order_ids else super().cancel_path_for(client_order_id)
+        return self.algo_order_path if client_order_id in self._algo_order_ids else super().cancel_path_for(client_order_id)
 
     def get_open_orders(self):
         regular = super().get_open_orders()
         payload = self._testnet_request("GET", self.algo_open_orders_path, {"symbol": self.config.symbol or "BTCUSDT"})
-        return regular + self.normalize_orders(payload)
+        combined = regular + self.normalize_orders(payload)
+        unique = {}
+        for order in combined:
+            unique[(order.exchange_order_id, order.client_order_id)] = order
+        return list(unique.values())
+
+    def normalize_orders(self, payload):
+        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+            payload = payload["data"]
+        return super().normalize_orders(payload)
+
+    def normalize_order(self, response):
+        if isinstance(response, dict) and isinstance(response.get("data"), dict):
+            response = response["data"]
+        if not isinstance(response, dict):
+            raise ValueError("Malformed Binance Algo response")
+        mapped = dict(response)
+        client_order_id = response.get("clientAlgoId", response.get("clientOrderId"))
+        context = self._algo_order_requests.get(client_order_id) if client_order_id else None
+        if context is not None:
+            mapped.setdefault("symbol", context.symbol)
+            mapped.setdefault("side", context.side)
+            mapped.setdefault("quantity", context.quantity)
+            mapped.setdefault("orderType", context.order_type)
+            mapped.setdefault("triggerPrice", context.stop_price)
+            mapped.setdefault("price", context.price)
+            mapped.setdefault("reduceOnly", context.reduce_only)
+            mapped.setdefault("closePosition", context.close_position)
+        mapped["type"] = mapped.get("orderType", mapped.get("type"))
+        if mapped["type"] is None and context is not None:
+            mapped["type"] = context.order_type
+        mapped["status"] = mapped.get("algoStatus", mapped.get("status", "NEW"))
+        mapped["clientOrderId"] = mapped.get("clientAlgoId", mapped.get("clientOrderId"))
+        mapped["orderId"] = mapped.get("algoId", mapped.get("orderId"))
+        mapped["stopPrice"] = mapped.get("triggerPrice", mapped.get("stopPrice"))
+        mapped["origQty"] = mapped.get("quantity", mapped.get("origQty", 0))
+        mapped["reduceOnly"] = mapped.get("reduceOnly", False)
+        mapped["closePosition"] = mapped.get("closePosition", False)
+        order = NormalizingExecutionAdapter.normalize_order(self, mapped)
+        if order.client_order_id and order.exchange_order_id:
+            self._algo_order_ids[order.client_order_id] = order.exchange_order_id
+        return order
 
     def order_params(self, order):
         def decimal_param(value, field, places):
@@ -265,8 +307,8 @@ class BinanceExecutionAdapter(NormalizingExecutionAdapter):
         return params
 
     def order_query_params(self, client_order_id):
-        if client_order_id in self._algo_client_order_ids:
-            return {"symbol": self.config.symbol or "BTCUSDT", "clientAlgoId": client_order_id}
+        if client_order_id in self._algo_order_ids:
+            return {"algoId": self._algo_order_ids[client_order_id]}
         return {"symbol": self.config.symbol or "BTCUSDT", "origClientOrderId": client_order_id}
 
 
