@@ -5,6 +5,8 @@ import asyncio
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import websockets
+
 
 class ControlCenter:
     """Read-only dashboard/API projection of canonical APEX state."""
@@ -145,6 +147,41 @@ class DashboardWebSocket:
         return self.service.get("/snapshot")
 
 
+class DashboardWebSocketServer:
+    """Network read-only WebSocket projection backed by the HTTP service state."""
+
+    def __init__(self, result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
+        self.service = DashboardService(result_provider, paper_position_provider)
+        self.host = host
+        self.port = port
+        self._server = None
+
+    async def _handler(self, connection):
+        await connection.send(json.dumps(self.service.get("/snapshot"), sort_keys=True, default=str))
+        async for message in connection:
+            try:
+                request = json.loads(message)
+                action = str(request.get("action", request.get("path", ""))).lower()
+                if action in {"order", "orders", "trade", "execute", "cancel", "position", "create-order", "place-order", "submit-order", "cancel-order", "/order", "/orders", "/trade", "/execute", "/cancel", "/position"}:
+                    await connection.send(json.dumps({"error": "forbidden", "message": "Dashboard stream is read-only"}, sort_keys=True))
+                    continue
+                await connection.send(json.dumps(self.service.get("/snapshot"), sort_keys=True, default=str))
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                await connection.close(code=1003, reason="Malformed read-only request")
+                return
+
+    async def start(self):
+        self._server = await websockets.serve(self._handler, self.host, self.port)
+        self.port = self._server.sockets[0].getsockname()[1]
+        return self
+
+    async def close(self):
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+
+
 def create_app(result_provider, paper_position_provider=None) -> DashboardService:
     """Create the dependency-free read-only control-center service."""
     return DashboardService(result_provider, paper_position_provider)
@@ -152,3 +189,7 @@ def create_app(result_provider, paper_position_provider=None) -> DashboardServic
 
 def create_http_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
     return DashboardHTTPServer((host, port), create_app(result_provider, paper_position_provider))
+
+
+def create_websocket_server(result_provider, paper_position_provider=None, host="127.0.0.1", port=0):
+    return DashboardWebSocketServer(result_provider, paper_position_provider, host, port)

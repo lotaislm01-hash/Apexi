@@ -4,7 +4,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from brain.dashboard import DashboardWebSocket, create_app, create_http_server
+from brain.dashboard import DashboardWebSocket, create_app, create_http_server, create_websocket_server
 from brain.decision import BrainDecision, DecisionLevels
 from brain.risk import RiskResult
 
@@ -65,6 +65,26 @@ def test_websocket_stream_emits_canonical_state_and_rejects_mutation():
     assert updates["symbol"] == "BTCUSDT"
     with pytest.raises(PermissionError):
         stream.receive('{"action":"execute"}')
+
+
+def test_network_websocket_serves_snapshot_and_rejects_mutation():
+    import asyncio
+    import json
+    import websockets
+
+    async def exercise():
+        server = await create_websocket_server(lambda: result()).start()
+        try:
+            async with websockets.connect(f"ws://127.0.0.1:{server.port}") as client:
+                snapshot = json.loads(await client.recv())
+                assert snapshot["symbol"] == "BTCUSDT"
+                await client.send('{"action":"place-order"}')
+                rejection = json.loads(await client.recv())
+                assert rejection == {"error": "forbidden", "message": "Dashboard stream is read-only"}
+        finally:
+            await server.close()
+
+    asyncio.run(exercise())
 
 
 async def _one_update(stream):
