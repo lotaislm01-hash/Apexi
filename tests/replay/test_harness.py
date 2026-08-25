@@ -34,3 +34,31 @@ def test_raw_replay_steps_are_incremental_and_deterministic():
     assert first == second
     assert len(first) == 2
     assert [item["context"]["event_time"] for item in first] == [1, 2]
+
+
+def test_raw_replay_cutoff_is_immune_to_future_events():
+    from market.replay import RawBybitEvent, RawBybitReplayHarness
+
+    historical = [
+        RawBybitEvent(1, 1, {"topic": "tickers.BTCUSDT", "ts": 1000, "data": {"lastPrice": "100"}}),
+        RawBybitEvent(2, 2, {"topic": "tickers.BTCUSDT", "ts": 2000, "data": {"lastPrice": "101"}}),
+    ]
+    future = historical + [
+        RawBybitEvent(3, 3, {"topic": "tickers.BTCUSDT", "ts": 3000, "data": {"lastPrice": "999"}}),
+    ]
+    first = RawBybitReplayHarness(historical).run_steps(ApexBrainPipeline(), as_of=2)
+    second = RawBybitReplayHarness(future).run_steps(ApexBrainPipeline(), as_of=2)
+    assert [item.to_dict() for item in first] == [item.to_dict() for item in second]
+
+
+def test_raw_replay_classifies_out_of_order_input_without_contaminating_state():
+    from market.replay import RawBybitEvent, RawBybitReplayHarness
+
+    events = [
+        RawBybitEvent(2, 2, {"topic": "tickers.BTCUSDT", "ts": 2000, "data": {"lastPrice": "101"}}),
+        RawBybitEvent(1, 1, {"topic": "tickers.BTCUSDT", "ts": 1000, "data": {"lastPrice": "100"}}),
+    ]
+    harness = RawBybitReplayHarness(events)
+    results = harness.run_steps(ApexBrainPipeline())
+    assert [item.pipeline_result.context.event_time for item in results] == [1.0, 2.0]
+    assert any(item["status"] == "OUT_OF_ORDER" for item in harness.diagnostics)

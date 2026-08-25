@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from market.integration.context_adapter import LiveSnapshotContextAdapter
@@ -61,16 +62,40 @@ class RawBybitReplayHarness:
             event if isinstance(event, RawBybitEvent) else RawBybitEvent(**event)
             for event in events
         )
-        if any(current.event_time < previous.event_time for previous, current in zip(self.events, self.events[1:])):
-            raise ValueError("Raw replay events must be chronological")
         self.symbol = symbol
         self.timeframe_metadata = timeframe_metadata or {}
+        self.diagnostics: tuple[dict, ...] = ()
+
+    @staticmethod
+    def _fingerprint(event: RawBybitEvent) -> str:
+        return json.dumps(event.message, sort_keys=True, separators=(",", ":"), default=str)
+
+    def _events_for_cutoff(self, as_of: float | None = None) -> tuple[RawBybitEvent, ...]:
+        """Return a stable event-time view and classify unsafe input explicitly."""
+        diagnostics: list[dict] = []
+        for index, (previous, current) in enumerate(zip(self.events, self.events[1:]), start=1):
+            if current.event_time < previous.event_time and (as_of is None or current.event_time <= as_of):
+                diagnostics.append({"index": index, "status": "OUT_OF_ORDER", "event_time": current.event_time})
+        ordered = tuple(sorted(enumerate(self.events), key=lambda item: (item[1].event_time, item[1].received_time, item[0])))
+        seen: set[str] = set()
+        selected: list[RawBybitEvent] = []
+        for original_index, event in ordered:
+            if as_of is not None and event.event_time > as_of:
+                continue
+            fingerprint = self._fingerprint(event)
+            if fingerprint in seen:
+                diagnostics.append({"index": original_index, "status": "DUPLICATE", "event_time": event.event_time})
+                continue
+            seen.add(fingerprint)
+            selected.append(event)
+        self.diagnostics = tuple(diagnostics)
+        return tuple(selected)
 
     def run(self, pipeline):
         steps = self.run_steps(pipeline)
         if not steps:
             snapshot = LiveMarketSnapshot(self.symbol)
-            for event in self.events:
+            for event in self._events_for_cutoff():
                 snapshot.feed._process_message(event.message, received_time=event.received_time)
             context = LiveSnapshotContextAdapter(snapshot).build(
                 calculation_time=self.events[-1].received_time if self.events else 0.0,
@@ -78,13 +103,15 @@ class RawBybitReplayHarness:
             if context is None:
                 raise ValueError("Raw replay produced no price-bearing market context")
             context.metadata["timeframe_metadata"] = self.timeframe_metadata
+            context.metadata["replay_diagnostics"] = list(self.diagnostics)
             return RawReplayResult(pipeline.run(context))
         return steps[-1]
 
-    def run_steps(self, pipeline):
+    def run_steps(self, pipeline, *, as_of: float | None = None):
         snapshot = LiveMarketSnapshot(self.symbol)
         results = []
-        for event in self.events:
+        events = self._events_for_cutoff(as_of)
+        for event in events:
             snapshot.feed._process_message(
                 event.message,
                 received_time=event.received_time,
@@ -97,5 +124,6 @@ class RawBybitReplayHarness:
             if context is None:
                 continue
             context.metadata["timeframe_metadata"] = self.timeframe_metadata
+            context.metadata["replay_diagnostics"] = list(self.diagnostics)
             results.append(RawReplayResult(pipeline.run(context)))
         return results
